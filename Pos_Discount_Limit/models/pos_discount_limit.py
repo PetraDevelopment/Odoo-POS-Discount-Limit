@@ -250,14 +250,15 @@ class orderReport(models.AbstractModel):
                     CASE 
                         WHEN s.discount_selected = 'percentage' THEN ROUND((l.qty * l.price_unit) * (100 - l.discount) / 100 / CASE COALESCE(s.currency_rate, 0) WHEN 0 THEN 1.0 ELSE s.currency_rate END, cu.decimal_places)
                         WHEN s.discount_selected = 'fixed' THEN ROUND((l.qty * l.price_unit) - (l.qty * l.discount) / CASE COALESCE(s.currency_rate, 0) WHEN 0 THEN 1.0 ELSE s.currency_rate END, cu.decimal_places)
-                        ELSE 0
+                        ELSE ROUND((l.qty * l.price_unit) * (100 - l.discount) / 100 / CASE COALESCE(s.currency_rate, 0) WHEN 0 THEN 1.0 ELSE s.currency_rate END, cu.decimal_places)
+ 
                     END
                 ) AS price_total,
                 SUM(
                     CASE
                         WHEN s.discount_selected = 'percentage' THEN ROUND((l.qty * l.price_unit) * (l.discount / 100) / CASE COALESCE(s.currency_rate, 0) WHEN 0 THEN 1.0 ELSE s.currency_rate END, cu.decimal_places)
                         WHEN s.discount_selected = 'fixed' THEN ROUND( (l.discount * l.qty) / CASE COALESCE(s.currency_rate, 0) WHEN 0 THEN 1.0 ELSE s.currency_rate END, cu.decimal_places)
-                        ELSE 0
+                        ELSE (l.qty * l.price_unit) * (l.discount / 100) / CASE COALESCE(s.currency_rate, 0) WHEN 0 THEN 1.0 ELSE s.currency_rate END
                     END
                 ) AS total_discount,
                 CASE
