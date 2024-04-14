@@ -1,5 +1,3 @@
-
-
 /** @odoo-module **/
 /*
  * This file is used to restrict out of stock product from ordering and show restrict popup
@@ -85,12 +83,8 @@ Orderline.Orderline.prototype.set_discount = function(discount) {
         current.discount_type = discountType; 
         if (discountType == 'fixed') {
             current.discountStr = '' + disc;
-            current.trigger('change',this);
-
         } else {
             current.discountStr = '' + disc + ' %';
-            current.trigger('change',this);
-
         }
     });
 };
@@ -212,51 +206,7 @@ Orderline.Orderline.prototype._reduce_total_discount_callback=function(sum, orde
 Orderline.Orderline.prototype.get_discount_str=function(){
     // console.log(this.discountStr)
     return this.discountStr;
-},
-Orderline.Orderline.prototype.send_current_order_to_customer_facing_display= function() {
-    var self = this;
-    this.render_html_for_customer_facing_display().then(function (rendered_html) {
-        if (self.env.pos.customer_display) {
-            var $renderedHtml = $('<div>').html(rendered_html);
-            $(self.env.pos.customer_display.document.body).html($renderedHtml.find('.pos-customer_facing_display'));
-            var orderlines = $(self.env.pos.customer_display.document.body).find('.pos_orderlines_list');
-            orderlines.scrollTop(orderlines.prop("scrollHeight"));
-        } else if (self.env.pos.proxy.posbox_supports_display) {
-            self.proxy.update_customer_facing_display(rendered_html);
-        }
-    });
-},
-Orderline.Orderline.prototype.render_html_for_customer_facing_display= function () {
-    var self = this;
-    var order = this.get_order();
-
-    // If we're using an external device like the IoT Box, we
-    // cannot get /web/image?model=product.product because the
-    // IoT Box is not logged in and thus doesn't have the access
-    // rights to access product.product. So instead we'll base64
-    // encode it and embed it in the HTML.
-    var get_image_promises = [];
-
-    if (order) {
-        order.get_orderlines().forEach(function (orderline) {
-            var product = orderline.product;
-            var image_url = `/web/image?model=product.product&field=image_128&id=${product.id}&write_date=${product.write_date}&unique=1`;
-
-            // only download and convert image if we haven't done it before
-            if (! product.image_base64) {
-                get_image_promises.push(self._convert_product_img_to_base64(product, image_url));
-            }
-        });
-    }
-
-    return Promise.all(get_image_promises).then(function () {
-        return QWeb.render('CustomerFacingDisplayOrder', {
-            pos: self.env.pos,
-            origin: window.location.origin,
-            order: order,
-        });
-    });
-},
+}
 
 
 Orderline.Orderline.prototype.export_for_printing = function() {
@@ -282,7 +232,7 @@ Orderline.Orderline.prototype.export_for_printing = function() {
         price_without_tax: this.get_price_without_tax(),
         price_with_tax_before_discount: this.get_price_with_tax_before_discount(),
         tax: this.get_tax(),
-        // tax_percentages: this.get_tax_percentages(),
+        tax_percentages: this.get_tax_percentages(),
         product_description: this.get_product().description,
         product_description_sale: this.get_product().description_sale,
         pack_lot_lines: this.get_lot_lines(),
@@ -291,9 +241,6 @@ Orderline.Orderline.prototype.export_for_printing = function() {
         unitDisplayPriceBeforeDiscount: this.getUnitDisplayPriceBeforeDiscount(),
     };
 };
-Orderline.Orderline.prototype.get_selected_orderline=function(){
-    return this.selected_orderline;
-},
 
 Orderline.Orderline.prototype.export_as_JSON()= function() {
     var pack_lot_ids = [];

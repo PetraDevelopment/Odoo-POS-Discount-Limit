@@ -1,33 +1,44 @@
 from datetime import timedelta
 from functools import partial
 
-import pytz
+import pytz # type: ignore
 from odoo import api, models, fields,_
 from odoo.osv.expression import AND
 
 class PosDiscountNewTab(models.Model):
     _inherit = 'res.users'
 
-    fixed_limit = fields.Float(string="Fixed Limit")
-    percentage_limit = fields.Float(string="Percentage Limit")
+    fixed_limit = fields.Float(string="Fixed Limit", default=0.0)
+    percentage_limit = fields.Float(string="Percentage Limit", default=0.0)
 
 class ResConfigSettings(models.TransientModel):
     _inherit = 'res.config.settings'
 
-    discount_type = fields.Selection([('percentage', 'Percentage'), ('fixed', 'Fixed')], string='Discount Type')
+    discount_type = fields.Selection([('percentage', 'Percentage'), ('fixed', 'Fixed')], string='Discount Type' ,default=False)
     percentage_limit = fields.Float(string='Percentage Limit')
     fixed_limit = fields.Float(string='Fixed Limit')
     session_id = fields.Many2one('pos.session', string='Session ID')
 
+    order_discount=fields.Char(string='order discount', default='')
+
     @api.onchange('discount_type')
     def _onchange_discount_type(self):
         user = self.env.user
-        if self.discount_type == 'percentage':
+        if not self.discount_type:  
+            self.fixed_limit = False
+            self.percentage_limit = False
+            self.order_discount = ''
+        elif self.discount_type == 'percentage':
             self.fixed_limit = False
             self.percentage_limit = user.percentage_limit
+            self.order_discount = 'percentage'
         elif self.discount_type == 'fixed':
             self.fixed_limit = user.fixed_limit
             self.percentage_limit = False
+            self.order_discount = 'fixed'
+
+
+
 
     def set_values(self):
         super(ResConfigSettings, self).set_values()
@@ -35,6 +46,7 @@ class ResConfigSettings(models.TransientModel):
         config.set_param('pos.discount_type', self.discount_type)
         config.set_param('pos.percentage_limit', self.percentage_limit)
         config.set_param('pos.fixed_limit', self.fixed_limit)
+        config.set_param('pos.order_discount',self.order_discount)
         config.set_param('pos.session_id', self.session_id.id)
 
         # Apply the new discount type and limit to the POS session
@@ -43,9 +55,12 @@ class ResConfigSettings(models.TransientModel):
             session.discount_type = self.discount_type
             if self.discount_type == 'percentage':
                 session.discount_limit = self.percentage_limit
+                session.order_discount=self.order_discount
                 
             elif self.discount_type == 'fixed':
                 session.discount_limit = self.fixed_limit
+                session.order_discount=self.order_discount
+
 
             # Close and open the session to apply the changes
             session.action_pos_session_closing_control()
@@ -58,17 +73,19 @@ class ResConfigSettings(models.TransientModel):
         discount_type = config.get_param('pos.discount_type')
         percentage_limit = float(config.get_param('pos.percentage_limit'))
         fixed_limit = float(config.get_param('pos.fixed_limit'))
+        order_discount=config.get_param('pos.order_discount') or "none"
         res.update(
             discount_type=discount_type,
             percentage_limit=percentage_limit,
-            fixed_limit=fixed_limit
+            fixed_limit=fixed_limit,
+            order_discount=order_discount
         )
         return res
 
     @api.model
     def get_discount_limit(self, session_id):
         config = self.env['res.config.settings'].sudo().search([('session_id', '=', session_id)], limit=1).get_values()
-        discount_type = config.get('discount_type')
+        # discount_type = config.get('discount_type')
 
         if config['discount_type'] == 'percentage':
             return config['percentage_limit']
@@ -82,14 +99,14 @@ class DiscountOrderType(models.Model):
     _inherit = 'pos.order'
 
     discount_selected = fields.Char( string='Discount Type' ,readonly=True)
+    
 
     @api.model
     def _order_fields(self, ui_order):
         process_line = partial(self.env['pos.order.line']._order_line_fields, session_id=ui_order['pos_session_id'])
         config = self.env['res.config.settings'].sudo().get_values()
-        discount_type = config.get('discount_type')
-        
-        
+        order_discount = config.get('order_discount')
+
         return {
             'user_id':      ui_order['user_id'] or False,
             'session_id':   ui_order['pos_session_id'],
@@ -109,10 +126,10 @@ class DiscountOrderType(models.Model):
             'to_ship': ui_order['to_ship'] if "to_ship" in ui_order else False,
             'is_tipped': ui_order.get('is_tipped', False),
             'tip_amount': ui_order.get('tip_amount', 0),
-            'discount_selected': discount_type,
-
+            'access_token': ui_order.get('access_token', ''),
+            'discount_selected': order_discount,  # Set discount_selected based on discount_type
         }
-   
+        
 class PosOrderline(models.Model):
     _inherit = "pos.order.line"  
 
@@ -153,7 +170,7 @@ class ReportSaleDetails(models.AbstractModel):
                 # start by default today 00:00:00
                 user_tz = pytz.timezone(self.env.context.get('tz') or self.env.user.tz or 'UTC')
                 today = user_tz.localize(fields.Datetime.from_string(fields.Date.context_today(self)))
-                date_start = today.astimezone(pytz.timezone('UTC'))
+                date_start = today.astimezone(pytz.timezone('UTC')).replace(tzinfo=None)
 
             if date_stop:
                 date_stop = fields.Datetime.from_string(date_stop)
@@ -173,13 +190,17 @@ class ReportSaleDetails(models.AbstractModel):
                 domain = AND([domain, [('config_id', 'in', config_ids)]])
 
         orders = self.env['pos.order'].search(domain)
-
         user_currency = self.env.company.currency_id
-
+        dis_type_sold={}
+        # discount_type=self.env['pos.order'].browse('discount_selected')
         total = 0.0
         products_sold = {}
         taxes = {}
+
         for order in orders:
+            # dis_type=order.discount_selected
+
+            # discount_type=order.discount_selected
             if user_currency != order.pricelist_id.currency_id:
                 total += order.pricelist_id.currency_id._convert(
                     order.amount_total, user_currency, order.company_id, order.date_order or fields.Date.today())
@@ -188,11 +209,14 @@ class ReportSaleDetails(models.AbstractModel):
             currency = order.session_id.currency_id
 
             for line in order.lines:
-                key = (line.product_id, line.price_unit, line.discount)
+                key = (line.product_id, line.price_unit, line.discount )
+                # products_sold.setdefault(key, 0.0)
                 products_sold.setdefault(key, {'qty':0.0,'dis':''})
                 products_sold[key]['qty'] += line.qty
                 products_sold[key]['dis'] = order.discount_selected
+                # dis_type_sold.setdefault(key,order.discount_selected)
 
+                
                 if line.tax_ids_after_fiscal_position:
                     line_taxes = line.tax_ids_after_fiscal_position.sudo().compute_all(line.price_unit * (1-(line.discount or 0.0)/100.0), currency, line.qty, product=line.product_id, partner=line.order_id.partner_id or False)
                     for tax in line_taxes['taxes']:
@@ -206,18 +230,22 @@ class ReportSaleDetails(models.AbstractModel):
         payment_ids = self.env["pos.payment"].search([('pos_order_id', 'in', orders.ids)]).ids
         if payment_ids:
             self.env.cr.execute("""
-                SELECT method.name, sum(amount) total
+                SELECT COALESCE(method.name->>%s, method.name->>'en_US') as name, sum(amount) total
                 FROM pos_payment AS payment,
                      pos_payment_method AS method
                 WHERE payment.payment_method_id = method.id
                     AND payment.id IN %s
                 GROUP BY method.name
-            """, (tuple(payment_ids),))
+            """, (self.env.lang, tuple(payment_ids),))
             payments = self.env.cr.dictfetchall()
         else:
             payments = []
 
+        # dis_type=dis_type_sold.items()
+        # print(dis_type)
         return {
+            'date_start': date_start,
+            'date_stop': date_stop,
             'currency_precision': user_currency.decimal_places,
             'total_paid': user_currency.round(total),
             'payments': payments,
@@ -231,12 +259,12 @@ class ReportSaleDetails(models.AbstractModel):
                 'price_unit': price_unit,
                 'discount': discount,
                 'discount_type': qty['dis'],
-                'uom': product.uom_id.name,
+                'uom': product.uom_id.name
             } for (product, price_unit, discount), qty in products_sold.items()], key=lambda l: l['product_name'])
         }
-    
 class orderReport(models.AbstractModel):
     _inherit= 'report.pos.order'
+
 
     def _select(self):
         return """
@@ -250,22 +278,22 @@ class orderReport(models.AbstractModel):
                     CASE 
                         WHEN s.discount_selected = 'percentage' THEN ROUND((l.qty * l.price_unit) * (100 - l.discount) / 100 / CASE COALESCE(s.currency_rate, 0) WHEN 0 THEN 1.0 ELSE s.currency_rate END, cu.decimal_places)
                         WHEN s.discount_selected = 'fixed' THEN ROUND((l.qty * l.price_unit) - (l.qty * l.discount) / CASE COALESCE(s.currency_rate, 0) WHEN 0 THEN 1.0 ELSE s.currency_rate END, cu.decimal_places)
-                        ELSE 0
+                        ELSE ROUND((l.qty * l.price_unit) * (100 - l.discount) / 100 / CASE COALESCE(s.currency_rate, 0) WHEN 0 THEN 1.0 ELSE s.currency_rate END, cu.decimal_places)
                     END
                 ) AS price_total,
                 SUM(
                     CASE
                         WHEN s.discount_selected = 'percentage' THEN ROUND((l.qty * l.price_unit) * (l.discount / 100) / CASE COALESCE(s.currency_rate, 0) WHEN 0 THEN 1.0 ELSE s.currency_rate END, cu.decimal_places)
                         WHEN s.discount_selected = 'fixed' THEN ROUND( (l.discount * l.qty) / CASE COALESCE(s.currency_rate, 0) WHEN 0 THEN 1.0 ELSE s.currency_rate END, cu.decimal_places)
-                        ELSE 0
+                        ELSE (l.qty * l.price_unit) * (l.discount / 100) / CASE COALESCE(s.currency_rate, 0) WHEN 0 THEN 1.0 ELSE s.currency_rate END
                     END
                 ) AS total_discount,
                 CASE
                     WHEN SUM(l.qty * u.factor) = 0 THEN NULL
-                    ELSE (SUM(l.qty * l.price_unit / CASE COALESCE(s.currency_rate, 0) WHEN 0 THEN 1.0 ELSE s.currency_rate END) / SUM(l.qty * u.factor))::decimal
+                    ELSE (SUM(l.qty*l.price_unit / CASE COALESCE(s.currency_rate, 0) WHEN 0 THEN 1.0 ELSE s.currency_rate END)/SUM(l.qty * u.factor))::decimal
                 END AS average_price,
-                SUM(cast(to_char(date_trunc('day', s.date_order) - date_trunc('day', s.create_date), 'DD') AS INT)) AS delay_validation,
-                s.id AS order_id,
+                SUM(cast(to_char(date_trunc('day',s.date_order) - date_trunc('day',s.create_date),'DD') AS INT)) AS delay_validation,
+                s.id as order_id,
                 s.partner_id AS partner_id,
                 s.state AS state,
                 s.user_id AS user_id,
@@ -279,5 +307,14 @@ class orderReport(models.AbstractModel):
                 s.pricelist_id,
                 s.session_id,
                 s.account_move IS NOT NULL AS invoiced,
-                SUM(l.price_subtotal - COALESCE(l.total_cost, 0) / CASE COALESCE(s.currency_rate, 0) WHEN 0 THEN 1.0 ELSE s.currency_rate END) AS margin
+                SUM(l.price_subtotal - COALESCE(l.total_cost,0) / CASE COALESCE(s.currency_rate, 0) WHEN 0 THEN 1.0 ELSE s.currency_rate END) AS margin
         """
+
+
+class PosDetails(models.TransientModel):
+    _inherit = 'pos.details.wizard'
+
+    def generate_report(self):
+        data = {'date_start': self.start_date, 'date_stop': self.end_date, 'config_ids': self.pos_config_ids.ids}
+        print(data)
+        return self.env.ref('point_of_sale.sale_details_report').report_action([], data=data)
