@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+<template id="assets_backend" name="helpdesk assets" inherit_id="web.assets_backend">
+    <xpath expr="//script[last()]" position="after">
+        <script type="text/javascript" src="/Pos_Discount_Limit/static/src/js/orderreceipttype.js"></script>
+        <script type="text/javascript" src="/Pos_Discount_Limit/static/src/js/models.js"></script>
+        <script type="text/javascript" src="/Pos_Discount_Limit/static/src/js/discountlimit.js"></script>
+
+    </xpath>
+</template>
+</odoo>

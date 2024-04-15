@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates id="template" xml:space="preserve">
+    <t t-name="Orderline" t-inherit="point_of_sale.Orderline" t-inherit-mode="extension" owl="1">
+        <xpath expr="//ul[@class='info-list']" position="replace">
+            
+            <t t-if="props.line.get_quantity_str() !== '1' || props.line.selected ">
+                <li class="info">
+                    <em>
+                        <t t-esc="props.line.get_quantity_str()" />
+                    </em>
+                    <span> </span><t t-esc="props.line.get_unit().name" />
+                    at
+                    <t t-if="props.line.display_discount_policy() == 'without_discount' and
+                        props.line.get_unit_display_price() &lt; props.line.get_taxed_lst_unit_price()">
+                        <s>
+                            <t t-esc="env.pos.format_currency(props.line.get_taxed_lst_unit_price(),'Product Price')" />
+                        </s>
+                        <t t-esc="env.pos.format_currency(props.line.get_unit_display_price(),'Product Price')" />
+                    </t>
+                    <t t-else="">
+                        <t t-esc="env.pos.format_currency(props.line.get_unit_display_price(),'Product Price')" />
+                    </t>
+                    /
+                    <t t-esc="props.line.get_unit().name" />
+                </li>
+            </t>
+            <t t-if="props.line.get_discount_str() !== '0'">
+                <li class="info">
+                    With a
+                    <t t-if="props.line.discount_type === 'fixed'">
+                        <em>
+                            <span t-esc="env.pos.currency.symbol"/>
+                            <t t-esc="props.line.get_discount_str()" />
+                        </em>
+                    </t>
+                    <t t-else="">
+                        <em>
+                            <t t-esc="props.line.get_discount_str()" />
+                        </em>
+                    </t>
+                    discount
+                </li>
+            </t>
+                
+        </xpath>
+    </t>
+</templates>

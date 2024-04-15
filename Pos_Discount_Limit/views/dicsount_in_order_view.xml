@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <data>
+        <record id="order_pos_views" model="ir.ui.view">
+            <field name="name">order.pos.fields.views.form</field>
+            <field name="model">pos.order</field>
+            <field name="inherit_id" ref="point_of_sale.view_pos_pos_form"/>
+            <field name="arch" type="xml">
+                <xpath expr="//group[@name='order_fields']" position="after">
+                    <group>
+                        <field name="discount_selected" />
+                    </group>
+                </xpath>
+                <xpath expr="//page[@name='products']//tree//field[@name='discount']" position="attributes">
+                    <attribute name="string">Discount</attribute>
+                </xpath>
+                <xpath expr="//tree" position="inside">
+                    <field name="limit_discount" invisible="1" />
+                </xpath>
+            </field>
+        </record>
+
+        
+    </data>
+</odoo>
